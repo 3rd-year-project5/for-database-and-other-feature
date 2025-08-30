@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Visitor Registration - QRGate</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, select, textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
+        input:focus, select:focus, textarea:focus { border-color: #4CAF50; outline: none; }
+        button { background-color: #4CAF50; color: white; padding: 12px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; width: 100%; margin-top: 10px; }
+        button:hover { background-color: #45a049; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        .button-group { display: flex; gap: 10px; align-items: center; }
+        #qrcode { text-align: center; margin-top: 30px; padding: 20px; background-color: #f9f9f9; border-radius: 5px; min-height: 50px; }
+        #visitorDetails { margin-top: 20px; }
+        .success-msg { color: #4CAF50; padding: 10px; background-color: #e8f5e8; border-radius: 5px; margin: 10px 0; }
+        .error-msg { color: #f44336; padding: 10px; background-color: #ffebee; border-radius: 5px; margin: 10px 0; }
+        .visitor-info { background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🎫 Visitor Registration System</h2>
+        <form id="visitorForm">
+            <div class="form-group">
+                <label for="visitorName">Full Name *</label>
+                <input type="text" id="visitorName" placeholder="Enter your full name" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="visitorEmail">Email Address</label>
+                <input type="email" id="visitorEmail" placeholder="Enter your email">
+            </div>
+            
+            <div class="form-group">
+                <label for="visitorPhone">Phone Number</label>
+                <input type="tel" id="visitorPhone" placeholder="Enter your phone number">
+            </div>
+            
+            <div class="form-group">
+                <label for="visitPurpose">Purpose of Visit</label>
+                <select id="visitPurpose">
+                    <option value="">Select purpose</option>
+                    <option value="Meeting">Meeting</option>
+                    <option value="Interview">Interview</option>
+                    <option value="Delivery">Delivery</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Personal Visit">Personal Visit</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="hostName">Host/Contact Person</label>
+                <input type="text" id="hostName" placeholder="Person you're visiting">
+            </div>
+            
+            <div class="form-group">
+                <label for="additionalNotes">Additional Notes</label>
+                <textarea id="additionalNotes" rows="3" placeholder="Any additional information..."></textarea>
+            </div>
+            
+            <div class="button-group">
+                <button type="submit" id="generateBtn">🔄 Generate QR Code</button>
+                <button type="button" id="clearBtn" style="display:none;">Clear</button>
+            </div>
+        </form>
+        
+        <div id="messages"></div>
+        <div id="qrcode"></div>
+        <div id="visitorDetails"></div>
+    </div>
+
+    <script>
+        function showMessage(text, type='success'){
+            const msgDiv = document.getElementById('messages');
+            msgDiv.innerHTML = `<div class="${type}-msg">${text}</div>`;
+            setTimeout(()=>{ msgDiv.innerHTML=''; }, 5000);
+        }
+
+        function generateQRCode(text, size=300){
+            const encoded = encodeURIComponent(text);
+            const url = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encoded}`;
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = 'QR Code';
+            return img;
+        }
+
+        document.getElementById('visitorForm').addEventListener('submit', function(e){
+            e.preventDefault();
+
+            const formData = new FormData();
+            formData.append('full_name', document.getElementById('visitorName').value.trim());
+            formData.append('email', document.getElementById('visitorEmail').value.trim());
+            formData.append('phone', document.getElementById('visitorPhone').value.trim());
+            formData.append('purpose', document.getElementById('visitPurpose').value);
+            formData.append('host', document.getElementById('hostName').value.trim());
+            formData.append('notes', document.getElementById('additionalNotes').value.trim());
+
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.textContent = "Generating...";
+
+            fetch('register.php', { method:'POST', body: formData })
+            .then(res=>res.json())
+            .then(data=>{
+                btn.disabled=false;
+                btn.textContent="🔄 Generate QR Code";
+
+                if(!data.ok){ showMessage('Failed to register visitor','error'); return; }
+
+                const qrImg = generateQRCode(data.qr_code,300);
+                const qrDiv = document.getElementById('qrcode');
+                qrDiv.innerHTML='';
+                qrDiv.appendChild(qrImg);
+
+                const visitorDiv = document.getElementById('visitorDetails');
+                visitorDiv.innerHTML = `<div class="visitor-info">
+                    <p><strong>Name:</strong> ${document.getElementById('visitorName').value.trim()}</p>
+                    <p><strong>Email:</strong> ${document.getElementById('visitorEmail').value.trim()}</p>
+                    <p><strong>Phone:</strong> ${document.getElementById('visitorPhone').value.trim()}</p>
+                    <p><strong>Purpose:</strong> ${document.getElementById('visitPurpose').value}</p>
+                    <p><strong>Host:</strong> ${document.getElementById('hostName').value.trim()}</p>
+                    <p><strong>Notes:</strong> ${document.getElementById('additionalNotes').value.trim()}</p>
+                    <p><strong>Expires at:</strong> ${data.expiry_at}</p>
+                </div>`;
+
+                document.getElementById('clearBtn').style.display='inline-block';
+                showMessage('QR Code generated successfully! 🎉');
+            })
+            .catch(err=>{
+                btn.disabled=false;
+                btn.textContent="🔄 Generate QR Code";
+                showMessage('Error: '+err.message,'error');
+            });
+        });
+
+        document.getElementById('clearBtn').addEventListener('click', function(){
+            document.getElementById('visitorForm').reset();
+            document.getElementById('qrcode').innerHTML='';
+            document.getElementById('visitorDetails').innerHTML='';
+            this.style.display='none';
+        });
+    </script>
+    <script src="func.js"></script>
+</body>
+</html>
