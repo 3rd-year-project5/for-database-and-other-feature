@@ -1,5 +1,7 @@
 <?php
 require __DIR__ . '/db.php';
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
 
 $full_name = $_POST['full_name'] ?? '';
 $email     = $_POST['email'] ?? '';
@@ -13,21 +15,38 @@ if ($full_name === '') {
     exit(json_encode(['ok'=>false,'msg'=>'Name is required']));
 }
 
-// Generate unique QR string
-$qr_code = bin2hex(random_bytes(8)); // 16 chars
-$expiry  = date('Y-m-d H:i:s', time() + 60); // expires in 1 min
-
-$stmt = $mysqli->prepare(
-    "INSERT INTO visitors(full_name,email,phone,purpose,host,notes,qr_code,expiry_at)
-     VALUES(?,?,?,?,?,?,?,?)"
-);
-$stmt->bind_param('ssssssss', $full_name,$email,$phone,$purpose,$host,$notes,$qr_code,$expiry);
-$stmt->execute();
-
-// Return JSON for frontend
-header('Content-Type: application/json');
-echo json_encode([
-    'ok' => true,
-    'qr_code' => $qr_code,
-    'expiry_at' => $expiry
-]);
+try {
+    // Generate unique QR string - this is what goes in the QR code
+    $qr_code = bin2hex(random_bytes(8)); // 16 character hex string
+    
+    // Set expiry time - changed from 1 minute to 24 hours for practical use
+    $expiry  = date('Y-m-d H:i:s', time() + 3600); // 1 hour
+    
+    $stmt = $mysqli->prepare(
+        "INSERT INTO visitors(full_name,email,phone,purpose,host,notes,qr_code,expiry_at)
+         VALUES(?,?,?,?,?,?,?,?)"
+    );
+    
+    if (!$stmt) {
+        throw new Exception("Prepare failed: " . $mysqli->error);
+    }
+    
+    $stmt->bind_param('ssssssss', $full_name,$email,$phone,$purpose,$host,$notes,$qr_code,$expiry);
+    
+    if (!$stmt->execute()) {
+        throw new Exception("Execute failed: " . $stmt->error);
+    }
+    
+    // Return the hex code that will be embedded in the QR image
+    echo json_encode([
+        'ok' => true,
+        'qr_code' => $qr_code,  // This hex string is what the QR code will contain
+        'expiry_at' => $expiry,
+        'visitor_id' => $mysqli->insert_id
+    ]);
+    
+} catch (Exception $e) {
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'msg' => 'Database error: ' . $e->getMessage()]);
+}
+?>

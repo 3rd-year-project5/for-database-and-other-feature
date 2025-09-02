@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>Visitor Registration - QRGate</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -20,6 +21,7 @@
         .success-msg { color: #4CAF50; padding: 10px; background-color: #e8f5e8; border-radius: 5px; margin: 10px 0; }
         .error-msg { color: #f44336; padding: 10px; background-color: #ffebee; border-radius: 5px; margin: 10px 0; }
         .visitor-info { background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }
+        .qr-code-info { background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #ffc107; }
     </style>
 </head>
 <body>
@@ -88,7 +90,14 @@
             const img = document.createElement('img');
             img.src = url;
             img.alt = 'QR Code';
+            img.style.maxWidth = '100%';
             return img;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         document.getElementById('visitorForm').addEventListener('submit', function(e){
@@ -112,22 +121,32 @@
                 btn.disabled=false;
                 btn.textContent="🔄 Generate QR Code";
 
-                if(!data.ok){ showMessage('Failed to register visitor','error'); return; }
+                if(!data.ok){ 
+                    showMessage('Failed to register visitor: ' + (data.msg || 'Unknown error'),'error'); 
+                    return; 
+                }
 
-                const qrImg = generateQRCode(data.qr_code,300);
+                // FIXED: Use the random hex code from database, not form data
+                const qrImg = generateQRCode(data.qr_code, 300);
                 const qrDiv = document.getElementById('qrcode');
                 qrDiv.innerHTML='';
                 qrDiv.appendChild(qrImg);
 
+                // Add QR code info
+                const qrInfo = document.createElement('div');
+                qrInfo.className = 'qr-code-info';
+                qrInfo.innerHTML = `<p><strong>QR Code ID:</strong> ${escapeHtml(data.qr_code)}</p>`;
+                qrDiv.appendChild(qrInfo);
+
                 const visitorDiv = document.getElementById('visitorDetails');
                 visitorDiv.innerHTML = `<div class="visitor-info">
-                    <p><strong>Name:</strong> ${document.getElementById('visitorName').value.trim()}</p>
-                    <p><strong>Email:</strong> ${document.getElementById('visitorEmail').value.trim()}</p>
-                    <p><strong>Phone:</strong> ${document.getElementById('visitorPhone').value.trim()}</p>
-                    <p><strong>Purpose:</strong> ${document.getElementById('visitPurpose').value}</p>
-                    <p><strong>Host:</strong> ${document.getElementById('hostName').value.trim()}</p>
-                    <p><strong>Notes:</strong> ${document.getElementById('additionalNotes').value.trim()}</p>
-                    <p><strong>Expires at:</strong> ${data.expiry_at}</p>
+                    <p><strong>Name:</strong> ${escapeHtml(document.getElementById('visitorName').value.trim())}</p>
+                    <p><strong>Email:</strong> ${escapeHtml(document.getElementById('visitorEmail').value.trim())}</p>
+                    <p><strong>Phone:</strong> ${escapeHtml(document.getElementById('visitorPhone').value.trim())}</p>
+                    <p><strong>Purpose:</strong> ${escapeHtml(document.getElementById('visitPurpose').value)}</p>
+                    <p><strong>Host:</strong> ${escapeHtml(document.getElementById('hostName').value.trim())}</p>
+                    <p><strong>Notes:</strong> ${escapeHtml(document.getElementById('additionalNotes').value.trim())}</p>
+                    <p><strong>Expires at:</strong> ${escapeHtml(data.expiry_at)}</p>
                 </div>`;
 
                 document.getElementById('clearBtn').style.display='inline-block';
@@ -145,8 +164,8 @@
             document.getElementById('qrcode').innerHTML='';
             document.getElementById('visitorDetails').innerHTML='';
             this.style.display='none';
+            document.getElementById('messages').innerHTML='';
         });
     </script>
-    <script src="func.js"></script>
 </body>
 </html>
