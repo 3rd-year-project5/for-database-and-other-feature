@@ -1,4 +1,9 @@
 <?php
+// Fix for check.php - Add timezone setting at the top
+
+// Set timezone to Philippines
+date_default_timezone_set('Asia/Manila');
+
 require __DIR__.'/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -25,7 +30,7 @@ try {
     }
     
     $res = $stmt->get_result();
-    $now = new DateTimeImmutable('now');
+    $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
 
     if ($res->num_rows === 0) {
         // Log invalid attempt
@@ -40,7 +45,12 @@ try {
     }
 
     $row = $res->fetch_assoc();
-    $expiry = new DateTimeImmutable($row['expiry_at']);
+    $expiry = new DateTimeImmutable($row['expiry_at'], new DateTimeZone('Asia/Manila'));
+    
+    // Debug logging
+    error_log("Current time: " . $now->format('Y-m-d H:i:s'));
+    error_log("Expiry time: " . $expiry->format('Y-m-d H:i:s'));
+    error_log("Is expired? " . ($expiry < $now ? 'YES' : 'NO'));
     
     if ($expiry < $now) {
         // Log expired attempt
@@ -54,7 +64,8 @@ try {
             'status'=>'Expired', 
             'msg'=>'QR code has expired',
             'visitor_id'=>$row['visitor_id'],
-            'expired_at'=>$row['expiry_at']
+            'expired_at'=>$row['expiry_at'],
+            'current_time'=>$now->format('Y-m-d H:i:s') // For debugging
         ]);
         exit;
     }
@@ -74,7 +85,8 @@ try {
         'phone'=>$row['phone'],
         'purpose'=>$row['purpose'],
         'host'=>$row['host'],
-        'expires_at'=>$row['expiry_at']
+        'expires_at'=>$row['expiry_at'],
+        'current_time'=>$now->format('Y-m-d H:i:s') // For debugging
     ]);
     
 } catch (Exception $e) {

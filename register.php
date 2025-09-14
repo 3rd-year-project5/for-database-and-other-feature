@@ -1,4 +1,9 @@
 <?php
+// Fix for register.php - Add timezone setting at the top
+
+// Set timezone to Philippines
+date_default_timezone_set('Asia/Manila');
+
 require __DIR__ . '/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -19,8 +24,12 @@ try {
     // Generate unique QR string - this is what goes in the QR code
     $qr_code = bin2hex(random_bytes(8)); // 16 character hex string
     
-    // Set expiry time - changed from 1 minute to 24 hours for practical use
-    $expiry  = date('Y-m-d H:i:s', time() + 3600); // 1 hour
+    // Set expiry time - 1 hour from now in Philippines time
+    $expiry = date('Y-m-d H:i:s', time() + 3600); // 1 hour
+    
+    // Debug: Show current time and expiry time
+    error_log("Current time: " . date('Y-m-d H:i:s'));
+    error_log("Expiry time: " . $expiry);
     
     $stmt = $mysqli->prepare(
         "INSERT INTO visitors(full_name,email,phone,purpose,host,notes,qr_code,expiry_at)
@@ -42,7 +51,8 @@ try {
         'ok' => true,
         'qr_code' => $qr_code,  // This hex string is what the QR code will contain
         'expiry_at' => $expiry,
-        'visitor_id' => $mysqli->insert_id
+        'visitor_id' => $mysqli->insert_id,
+        'current_time' => date('Y-m-d H:i:s') // For debugging
     ]);
     
 } catch (Exception $e) {
