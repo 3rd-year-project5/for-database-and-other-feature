@@ -1,4 +1,7 @@
 <?php
+// Set timezone to Philippines
+date_default_timezone_set('Asia/Manila');
+
 require 'db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
@@ -15,9 +18,9 @@ try {
     
     $data = [];
     while ($row = $result->fetch_assoc()) {
-        // Check if expired
-        $now = new DateTimeImmutable('now');
-        $expiry = new DateTimeImmutable($row['expiry_at']);
+        // Check if expired using Philippines timezone
+        $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
+        $expiry = new DateTimeImmutable($row['expiry_at'], new DateTimeZone('Asia/Manila'));
         $row['is_expired'] = $expiry < $now;
         
         $data[] = $row;

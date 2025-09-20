@@ -52,20 +52,31 @@ try {
     error_log("Expiry time: " . $expiry->format('Y-m-d H:i:s'));
     error_log("Is expired? " . ($expiry < $now ? 'YES' : 'NO'));
     
+    $visitor_id = $row['visitor_id'];
+    $current_time = $now->format('Y-m-d H:i:s');
+    
     if ($expiry < $now) {
         // Log expired attempt
         $log_stmt = $mysqli->prepare("INSERT INTO logs(visitor_id, qr_code, status) VALUES(?, ?, 'Expired')");
         if ($log_stmt) {
-            $log_stmt->bind_param('is', $row['visitor_id'], $qr);
+            $log_stmt->bind_param('is', $visitor_id, $qr);
             $log_stmt->execute();
+        }
+        
+        // Update visitor's last status and scan time
+        $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=? WHERE visitor_id=?");
+        if ($update_stmt) {
+            $status = 'Expired';
+            $update_stmt->bind_param('ssi', $status, $current_time, $visitor_id);
+            $update_stmt->execute();
         }
         
         echo json_encode([
             'status'=>'Expired', 
             'msg'=>'QR code has expired',
-            'visitor_id'=>$row['visitor_id'],
+            'visitor_id'=>$visitor_id,
             'expired_at'=>$row['expiry_at'],
-            'current_time'=>$now->format('Y-m-d H:i:s') // For debugging
+            'current_time'=>$current_time // For debugging
         ]);
         exit;
     }
@@ -73,20 +84,28 @@ try {
     // Valid QR code - log successful scan
     $log_stmt = $mysqli->prepare("INSERT INTO logs(visitor_id, qr_code, status) VALUES(?, ?, 'Valid')");
     if ($log_stmt) {
-        $log_stmt->bind_param('is', $row['visitor_id'], $qr);
+        $log_stmt->bind_param('is', $visitor_id, $qr);
         $log_stmt->execute();
+    }
+    
+    // Update visitor's last status and scan time
+    $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=? WHERE visitor_id=?");
+    if ($update_stmt) {
+        $status = 'Valid';
+        $update_stmt->bind_param('ssi', $status, $current_time, $visitor_id);
+        $update_stmt->execute();
     }
 
     echo json_encode([
         'status'=>'Valid',
-        'visitor_id'=>$row['visitor_id'],
+        'visitor_id'=>$visitor_id,
         'visitor_name'=>$row['full_name'],
         'email'=>$row['email'],
         'phone'=>$row['phone'],
         'purpose'=>$row['purpose'],
         'host'=>$row['host'],
         'expires_at'=>$row['expiry_at'],
-        'current_time'=>$now->format('Y-m-d H:i:s') // For debugging
+        'current_time'=>$current_time // For debugging
     ]);
     
 } catch (Exception $e) {

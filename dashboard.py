@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 API_URL = "http://localhost/qrgate/get_visitors.php"
-UPDATE_INTERVAL = 0.5  # seconds
+UPDATE_INTERVAL = 3  # seconds - reduced from 0.5 for better performance
 
 # Enhanced color scheme
 COLORS = {
@@ -21,18 +21,20 @@ COLORS = {
     "white": "#ffffff"
 }
 
-# Status colors
+# Status colors - Updated to match Arduino LED colors
 STATUS_COLORS = {
-    "Valid": "#d1f2eb",  # light green
-    "Expired": "#fadbd8",  # light red
-    "Invalid": "#eaeded"  # light gray
+    "Valid": "#d1f2eb",    # light green (matches Arduino GREEN LED)
+    "Expired": "#fff3cd",  # light yellow (matches Arduino YELLOW LED)
+    "Invalid": "#fadbd8",  # light red (matches Arduino RED LED)
+    "Pending": "#e8f4fd"   # light blue for unscanned QRs
 }
 
 # Status text colors
 STATUS_TEXT_COLORS = {
-    "Valid": "#27ae60",
-    "Expired": "#e74c3c",
-    "Invalid": "#7f8c8d"
+    "Valid": "#27ae60",    # green text
+    "Expired": "#856404",  # yellow/orange text  
+    "Invalid": "#e74c3c",  # red text
+    "Pending": "#0c5460"   # blue text
 }
 
 
@@ -122,6 +124,9 @@ class QRGateDashboard:
         # Create table header
         self.create_header()
 
+        self.data_frame = tk.Frame(self.scrollable_frame, bg=COLORS["white"])
+        self.data_frame.pack(fill="x")
+
         # Footer with last update time
         footer_frame = tk.Frame(main_container, bg=COLORS["light"])
         footer_frame.pack(fill="x", pady=(10, 0))
@@ -168,8 +173,7 @@ class QRGateDashboard:
                 return data['data']
             elif isinstance(data, list):
                 return data
-            else:
-                return []
+            
 
         except Exception as e:
             print(f"Error fetching data: {e}")
@@ -185,10 +189,9 @@ class QRGateDashboard:
             data = self.fetch_data()
 
             # Clear old rows
-            for widgets in self.rows_widgets:
-                for w in widgets:
-                    if w.winfo_exists():
-                        w.destroy()
+            for child in self.data_frame.winfo_children():
+                child.destroy()
+        # *** Reset the tracking list ***
             self.rows_widgets.clear()
 
             # Add new rows with enhanced styling
@@ -206,12 +209,33 @@ class QRGateDashboard:
             print(f"Error updating dashboard: {e}")
             self.status_dot.configure(fg=COLORS["danger"])
 
-    def create_visitor_row(self, row_num, visitor):
-        # Determine status and colors
-        status = visitor.get('last_status', 'Invalid')
-        if status not in STATUS_COLORS:
-            status = "Invalid"
+        
 
+    def create_visitor_row(self, row_num, visitor):
+        # Determine status and colors - IMPROVED LOGIC
+        last_status = visitor.get('last_status')
+        expiry_str = visitor.get('expiry_at', '')
+        
+        # Check if QR is expired
+        try:
+            expiry = datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            is_expired = expiry < now
+        except:
+            is_expired = False
+        
+        # Determine display status
+        if last_status:
+            # Visitor has scanned before - use actual status
+            status = last_status
+        elif is_expired:
+            # Never scanned and now expired
+            status = "Expired"
+        else:
+            # Never scanned but still valid
+            status = "Pending"
+            
+        # Get colors for status
         bg_color = STATUS_COLORS.get(status, "#eaeded")
         status_text_color = STATUS_TEXT_COLORS.get(status, "#7f8c8d")
 
@@ -220,7 +244,7 @@ class QRGateDashboard:
             bg_color = self.lighten_color(bg_color)
 
         # Row frame
-        row_frame = tk.Frame(self.scrollable_frame, bg=bg_color)
+        row_frame = tk.Frame(self.data_frame, bg=bg_color)
         row_frame.pack(fill="x", padx=10, pady=1)
 
         row_widgets = []
@@ -282,7 +306,7 @@ class QRGateDashboard:
         try:
             if qr_code:
                 qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=80x80&data={qr_code}"
-                response = requests.get(qr_url, timeout=5)
+                response = requests.get(qr_url, timeout=2)
 
                 if response.status_code == 200:
                     img = Image.open(BytesIO(response.content))
