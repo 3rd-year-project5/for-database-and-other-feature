@@ -28,7 +28,7 @@ try {
     $expiry = date('Y-m-d H:i:s', time() + 3600); // 1 hour
     
     // Debug: Show current time and expiry time
-    error_log("Current time: " . date('Y-m-d H:i:s'));
+    error_log("Current time: " . date('Y-m-d H:i:s:'));
     error_log("Expiry time: " . $expiry);
     
     $stmt = $mysqli->prepare(
