@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "737144101830",
+    "project_id": "mydesign12398",
+    "storage_bucket": "mydesign12398.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:737144101830:android:5f81c54595098f5d6530c7",
+        "android_client_info": {
+          "package_name": "com.example.uidesign"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCNZOFD7KHWFrlRJdn9Lu6yboXxNS-I8pk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

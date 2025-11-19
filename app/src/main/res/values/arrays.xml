@@ -1,0 +1,9 @@
+<resources>
+    <string-array name="purpose_list">
+        <item>Personal Visit</item>
+        <item>Business Meeting</item>
+        <item>Delivery</item>
+        <item>Maintenance</item>
+        <item>Others</item>
+    </string-array>
+</resources>
