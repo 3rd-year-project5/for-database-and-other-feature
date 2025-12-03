@@ -1,22 +1,35 @@
 <?php
+// Fix InfinityFree output buffer junk
+while (ob_get_level() > 0) ob_end_clean();
 // Set timezone to Philippines
 date_default_timezone_set('Asia/Manila');
+// Handle preflight OPTIONS request (required for CORS POST from Android/iOS)
 
 require __DIR__ . '/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header("Access-Control-Allow-Headers: Content-Type");
 
-// Get and trim inputs
-$full_name = trim($_POST['full_name'] ?? '');
-$email     = trim($_POST['email'] ?? '');
-$phone     = trim($_POST['phone'] ?? '');
-$purpose   = $_POST['purpose'] ?? '';
-$host      = trim($_POST['host'] ?? '');
-$notes     = trim($_POST['notes'] ?? '');
+// Handle preflight OPTIONS request
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+// Read the JSON body from the request
+$json_data = json_decode(file_get_contents('php://input'), true);
+
+// Get and trim inputs from the decoded JSON data
+$full_name = trim($json_data['full_name'] ?? '');
+$email= trim($json_data['email'] ?? '');
+$phone     = trim($json_data['phone'] ?? '');
+$purpose   = $json_data['purpose'] ?? '';
+$host      = trim($json_data['host'] ?? '');
+$notes     = trim($json_data['notes'] ?? '');
 
 // =======================================
 // VALIDATION FUNCTIONS
-// ======================================
+// ===================================
 
 function validateFullName($name) {
     // Check if name is empty
@@ -25,8 +38,8 @@ function validateFullName($name) {
     }
     
     // Check minimum length
-    if (strlen($name) < 3) {
-        return ['valid' => false, 'msg' => 'Name must be at least 3 characters'];
+    if (strlen($name) < 2) {
+        return ['valid' => false, 'msg' => 'Name must be at least 2 characters'];
     }
     
     // Check if name has at least 2 words (First name + Last name)
@@ -127,9 +140,9 @@ function validatePhilippinePhone($phone) {
     return ['valid' => true];
 }
 
-// ========================================
+// =====================================
 // PERFORM VALIDATIONS
-// ========================================
+// =======================================
 
 // Validate full name
 $name_validation = validateFullName($full_name);
@@ -154,7 +167,7 @@ if (!$phone_validation['valid']) {
 
 // ========================================
 // SANITIZE INPUTS (Security)
-// ========================================
+// =======================================
 
 // Sanitize name (capitalize properly)
 $full_name = ucwords(strtolower($full_name));
@@ -169,14 +182,14 @@ if (!empty($phone)) {
 
 // ========================================
 // INSERT INTO DATABASE
-// ========================================
+// =======================================
 
 try {
     // Generate unique QR string
     $qr_code = bin2hex(random_bytes(8)); // 16 character hex string
     
-    // Set expiry time - 1 hour from now
-    $expiry = date('Y-m-d H:i:s', time() + 3600); // 1 hour
+    // Set expiry time - 1 Day from now
+    $expiry = date('Y-m-d H:i:s', time() + 86400); // 1 Day
     
     // Debug logging
     error_log("Registration - Name: $full_name, Email: $email, Phone: $phone");

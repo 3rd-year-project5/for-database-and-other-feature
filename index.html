@@ -6,8 +6,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h2 { text-align: center; color: #333; margin-bottom: 30px; }
+        .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); position: relative; }
+        
+        /* Admin Login Button */
+        .admin-link {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: bold;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .admin-link:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        h2 { text-align: center; color: #333; margin-bottom: 30px; margin-top: 10px; }
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
         input, select, textarea { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; box-sizing: border-box; }
@@ -26,6 +49,11 @@
 </head>
 <body>
     <div class="container">
+        <!-- Admin Login Link -->
+        <a href="login.php" class="admin-link">
+            🔐 Admin Login
+        </a>
+        
         <h2>🎫 Visitor Registration System</h2>
         <form id="visitorForm">
             <div class="form-group">
@@ -104,19 +132,24 @@
         document.getElementById('visitorForm').addEventListener('submit', function(e){
             e.preventDefault();
 
-            const formData = new FormData();
-            formData.append('full_name', document.getElementById('visitorName').value.trim());
-            formData.append('email', document.getElementById('visitorEmail').value.trim());
-            formData.append('phone', document.getElementById('visitorPhone').value.trim());
-            formData.append('purpose', document.getElementById('visitPurpose').value);
-            formData.append('host', document.getElementById('hostName').value.trim());
-            formData.append('notes', document.getElementById('additionalNotes').value.trim());
+            const jsonData = {
+            full_name: document.getElementById('visitorName').value.trim(),
+            email: document.getElementById('visitorEmail').value.trim(),
+            phone: document.getElementById('visitorPhone').value.trim(),
+            purpose: document.getElementById('visitPurpose').value,
+            host: document.getElementById('hostName').value.trim(),
+            notes: document.getElementById('additionalNotes').value.trim()
+            };
 
             const btn = document.getElementById('generateBtn');
             btn.disabled = true;
             btn.textContent = "Generating...";
 
-            fetch('register.php', { method:'POST', body: formData })
+            fetch('register.php', { 
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(jsonData)
+            })
             .then(res=>res.json())
             .then(data=>{
                 btn.disabled=false;
@@ -127,13 +160,11 @@
                     return; 
                 }
 
-                // FIXED: Use the random hex code from database, not form data
                 const qrImg = generateQRCode(data.qr_code, 300);
                 const qrDiv = document.getElementById('qrcode');
                 qrDiv.innerHTML='';
                 qrDiv.appendChild(qrImg);
 
-                // Add QR code info
                 const qrInfo = document.createElement('div');
                 qrInfo.className = 'qr-code-info';
                 qrInfo.innerHTML = `<p><strong>QR Code ID:</strong> ${escapeHtml(data.qr_code)}</p>`;

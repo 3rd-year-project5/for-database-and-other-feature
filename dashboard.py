@@ -7,7 +7,13 @@ import threading
 import time
 from datetime import datetime, date
 import csv
+import ssl
+import urllib3
 
+# Disable SSL warnings (for testing - remove in production)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# FIXED: Changed to HTTPS
 API_URL = "http://localhost/qrgate/get_visitors.php"
 UPDATE_INTERVAL = 15  # Increased from 3 to 15 seconds
 
@@ -22,12 +28,16 @@ COLORS = {
     "white": "#ffffff"
 }
 
+# Column definitions (widths in pixels) - keep in sync for header and rows
+COLUMNS = ["ID", "Visitor Name", "Email", "Purpose", "Host", "QR Code", "Expires At", "Status", "Last Scan", "Duration", "Created At"]
+COLUMN_WIDTHS = [50, 150, 180, 120, 120, 80, 140, 80, 140, 100, 140]
+
 # Status colors - Updated to match Arduino LED colors
 STATUS_COLORS = {
     "Valid": "#d1f2eb",
     "Expired": "#fff3cd",
     "Invalid": "#fadbd8",
-    "Pending": "#e8f4fd"
+    "Inside": "#e8f4fd"   # was "Pending" -> now "Inside"
 }
 
 # Status text colors
@@ -35,7 +45,7 @@ STATUS_TEXT_COLORS = {
     "Valid": "#27ae60",
     "Expired": "#856404",
     "Invalid": "#e74c3c",
-    "Pending": "#0c5460"
+    "Inside": "#0c5460"   # was "Pending"
 }
 
 
@@ -57,7 +67,8 @@ class QRGateDashboard:
         self.last_qr_cache = {}
         self.qr_images_cache = {}
         self.last_data_hash = None
-        self.auto_refresh = True  # Added auto-refresh toggle
+        self.auto_refresh = True
+        self.connection_error_count = 0  # Track connection errors
 
         self.setup_ui()
         self.start_updates()
@@ -80,10 +91,18 @@ class QRGateDashboard:
         )
         title_label.pack()
 
+        # Connection info label
+        self.connection_info = tk.Label(
+            title_frame,
+            text=f"Connected to: {API_URL}",
+            font=("Arial", 9),
+            bg=COLORS["light"],
+            fg=COLORS["dark"]
+        )
+        self.connection_info.pack()
+
         # Statistics Panel
         self.create_stats_panel(main_container)
-
-
 
         # Control Panel (Search, Filter, Export)
         self.create_control_panel(main_container)
@@ -103,7 +122,7 @@ class QRGateDashboard:
 
         self.status_text = tk.Label(
             status_frame,
-            text="Live Updates",
+            text="Connecting...",
             font=("Arial", 12),
             bg=COLORS["light"],
             fg=COLORS["dark"]
@@ -164,7 +183,6 @@ class QRGateDashboard:
         self.stat_expired = self.create_stat_card(stats_frame, "Expired", "0", COLORS["warning"])
         self.stat_pending = self.create_stat_card(stats_frame, "Pending", "0", COLORS["dark"])
 
-
     def create_stat_card(self, parent, label, value, color):
         card = tk.Frame(parent, bg=color, relief="raised", borderwidth=2)
         card.pack(side="left", padx=10, fill="both", expand=True)
@@ -174,8 +192,6 @@ class QRGateDashboard:
         value_label.pack(pady=(5, 10))
 
         return value_label
-
-
 
     def create_control_panel(self, parent):
         control_frame = tk.Frame(parent, bg=COLORS["light"])
@@ -271,7 +287,6 @@ class QRGateDashboard:
         else:
             return "Pending"
 
-
     def export_to_csv(self):
         if not self.current_data:
             messagebox.showwarning("No Data", "No data to export!")
@@ -286,7 +301,6 @@ class QRGateDashboard:
             initialfile=default_filename
         )
 
-        # If user cancels the dialog, filename will be empty
         if not filename:
             return
 
@@ -317,8 +331,8 @@ class QRGateDashboard:
             messagebox.showerror("Export Failed", f"Error: {str(e)}")
 
     def create_header(self):
-        columns = ["ID", "Visitor Name", "Email", "Purpose", "Host", "QR Code", "Expires At", "Status", "Last Scan"]
-        column_widths = [50, 150, 180, 100, 120, 120, 140, 80, 140]
+        columns = COLUMNS
+        column_widths = COLUMN_WIDTHS
 
         header_frame = tk.Frame(self.scrollable_frame, bg=COLORS["primary"])
         header_frame.pack(fill="x", padx=10, pady=(10, 0))
@@ -330,28 +344,128 @@ class QRGateDashboard:
                 bg=COLORS["primary"],
                 fg=COLORS["white"],
                 font=("Arial", 11, "bold"),
-                width=width // 8,
+                width=max(8, width // 10),
                 relief="flat",
                 pady=15
             )
-            lbl.grid(row=0, column=i, sticky="nsew", padx=1)
-            header_frame.grid_columnconfigure(i, weight=1 if i in [1, 2] else 0)
+            lbl.grid(row=0, column=i, sticky="w", padx=1)
+            header_frame.grid_columnconfigure(i, minsize=width, weight=0)
+
+    def fetch_via_playwright(self):
+        """Fallback: use Playwright to run the JS challenge and return JSON data (requires playwright installed)."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as e:
+            print("Playwright not installed or failed to import:", e)
+            return []
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                ctx = browser.new_context()
+                page = ctx.new_page()
+                page.goto(API_URL, wait_until="networkidle", timeout=30000)
+                # After challenge the page should either redirect or show the JSON body.
+                # Try to read body text (if JSON returned directly)
+                body_text = page.inner_text("body")
+                browser.close()
+
+                import json
+                try:
+                    data = json.loads(body_text)
+                    if isinstance(data, dict) and 'data' in data:
+                        return data['data']
+                    if isinstance(data, list):
+                        return data
+                except Exception as e:
+                    print("Playwright fetch returned non-JSON body:", e)
+                    return []
+        except Exception as e:
+            print("Playwright error:", e)
+            return []
 
     def fetch_data(self):
         try:
-            response = requests.get(API_URL, timeout=10)
+            # Add detailed error logging
+            print(f"Attempting to fetch from: {API_URL}")
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Referer": API_URL
+            }
+            response = requests.get(API_URL, headers=headers, timeout=15, verify=False)
+            print(f"Response status code: {response.status_code}")
+            print(f"Response headers: {response.headers}")
             response.raise_for_status()
+
+            text_snip = response.text[:1000].lower()
+            if '<!doctype' in text_snip or '<html' in text_snip or 'cloudflare' in text_snip or 'attention required' in text_snip:
+                print("Detected HTML response (JS challenge). Attempting Playwright fallback...")
+                # try headless browser fallback
+                return self.fetch_via_playwright()
+
             data = response.json()
+            
+            print(f"Response data type: {type(data)}")
+            print(f"Response data keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
+
+            # Reset error count on success
+            self.connection_error_count = 0
 
             if isinstance(data, dict) and 'data' in data:
+                print(f"Found {len(data['data'])} visitors")
                 return data['data']
             elif isinstance(data, list):
+                print(f"Found {len(data)} visitors (list format)")
                 return data
+            else:
+                print(f"Unexpected data format: {data}")
+                return []
+
+        except requests.exceptions.SSLError as e:
+            self.connection_error_count += 1
+            print(f"SSL Error: {e}")
+            self.show_connection_error(f"SSL Certificate Error. Try accessing the website in your browser first.")
+            return []
+        except requests.exceptions.ConnectionError as e:
+            self.connection_error_count += 1
+            print(f"Connection Error: {e}")
+            self.show_connection_error(f"Cannot connect to server. Check your internet connection.")
+            return []
+        except requests.exceptions.Timeout as e:
+            self.connection_error_count += 1
+            print(f"Timeout Error: {e}")
+            self.show_connection_error(f"Server took too long to respond.")
+            return []
+        except requests.exceptions.HTTPError as e:
+            self.connection_error_count += 1
+            print(f"HTTP Error: {e}")
+            self.show_connection_error(f"Server error: {e}")
+            return []
+        except ValueError as e:
+            self.connection_error_count += 1
+            print(f"JSON Decode Error: {e}")
+            self.show_connection_error(f"Invalid response from server.")
+            return []
+        except Exception as e:
+            self.connection_error_count += 1
+            print(f"Unexpected error fetching data: {e}")
+            self.show_connection_error(f"Error: {str(e)}")
             return []
 
-        except Exception as e:
-            print(f"Error fetching data: {e}")
-            return []
+    def show_connection_error(self, message):
+        """Update UI to show connection error"""
+        self.root.after(0, lambda: self.status_text.config(
+            text=f"Connection Error ({self.connection_error_count})",
+            fg=COLORS["danger"]
+        ))
+        
+        # Show error dialog only on first few errors
+        if self.connection_error_count <= 3:
+            self.root.after(0, lambda: messagebox.showerror(
+                "Connection Error",
+                f"{message}\n\nURL: {API_URL}\n\nMake sure:\n1. The website is accessible\n2. get_visitors.php exists\n3. Database is configured correctly"
+            ))
 
     def calculate_data_hash(self, data):
         """Create a simple hash to detect data changes"""
@@ -361,7 +475,7 @@ class QRGateDashboard:
 
     def update_dashboard(self):
         if self.is_updating:
-            return  # Prevent overlapping updates
+            return
 
         self.is_updating = True
         try:
@@ -373,10 +487,15 @@ class QRGateDashboard:
             # Fetch new data
             new_data = self.fetch_data()
 
+            # Check if we got data
+            if not new_data and self.connection_error_count > 0:
+                self.status_dot.configure(fg=COLORS["danger"])
+                self.status_text.configure(text="Connection Failed", fg=COLORS["danger"])
+                return
+
             # Check if data actually changed
             new_hash = self.calculate_data_hash(new_data)
             if new_hash == self.last_data_hash and self.current_data:
-                # No changes, skip UI update
                 self.status_dot.configure(fg=COLORS["success"])
                 return
 
@@ -386,8 +505,6 @@ class QRGateDashboard:
             # Update statistics
             self.update_statistics()
 
-
-
             # Apply filters and display
             self.apply_filters()
 
@@ -395,10 +512,12 @@ class QRGateDashboard:
             self.last_update_label.configure(text=f"Last updated: {current_time}")
 
             self.status_dot.configure(fg=COLORS["success"])
+            self.status_text.configure(text="Live Updates", fg=COLORS["dark"])
 
         except Exception as e:
             print(f"Error updating dashboard: {e}")
             self.status_dot.configure(fg=COLORS["danger"])
+            self.status_text.configure(text="Update Error", fg=COLORS["danger"])
         finally:
             self.is_updating = False
 
@@ -419,12 +538,28 @@ class QRGateDashboard:
             child.destroy()
         self.rows_widgets.clear()
 
+        if not data:
+            # Show "No data" message
+            no_data_label = tk.Label(
+                self.data_frame,
+                text="No visitors found. Check your connection or try refreshing.",
+                font=("Arial", 14),
+                bg=COLORS["white"],
+                fg=COLORS["dark"],
+                pady=50
+            )
+            no_data_label.pack()
+            return
+
         # Add new rows
         for r, visitor in enumerate(data):
             self.create_visitor_row(r + 1, visitor)
 
     def create_visitor_row(self, row_num, visitor):
         status = self.get_visitor_status(visitor)
+        # map backend 'Pending' to UI 'Inside'
+        if status == "Pending":
+            status = "Inside"
 
         bg_color = STATUS_COLORS.get(status, "#eaeded")
         status_text_color = STATUS_TEXT_COLORS.get(status, "#7f8c8d")
@@ -437,6 +572,9 @@ class QRGateDashboard:
 
         row_widgets = []
 
+        # compute duration using created_at and last_scan (or last_status if available)
+        duration_str = self.format_duration(visitor.get('created_at'), visitor.get('last_scan'), visitor.get('last_status'))
+
         columns_data = [
             str(visitor.get('visitor_id', '')),
             visitor.get('full_name', ''),
@@ -446,13 +584,15 @@ class QRGateDashboard:
             '',
             self.format_datetime(visitor.get('expiry_at', '')),
             status,
-            self.format_datetime(visitor.get('last_scan', '')) or "Never"
+            self.format_datetime(visitor.get('last_scan', '')) or "Never",
+            duration_str,
+            self.format_datetime(visitor.get('created_at', ''))
         ]
 
-        column_widths = [50, 150, 180, 100, 120, 120, 140, 80, 140]
+        column_widths = COLUMN_WIDTHS
 
         for i, (data, width) in enumerate(zip(columns_data, column_widths)):
-            if i == 5:
+            if i == 5:   # QR code cell
                 self.create_qr_widget(row_frame, i, visitor.get('qr_code', ''), bg_color, row_widgets)
             elif i == 7:
                 lbl = tk.Label(
@@ -461,10 +601,12 @@ class QRGateDashboard:
                     bg=bg_color,
                     fg=status_text_color,
                     font=("Arial", 10, "bold"),
-                    width=width // 8,
-                    pady=10
+                    width=max(6, width // 10),
+                    pady=10,
+                    anchor="w",
+                    justify="left"
                 )
-                lbl.grid(row=0, column=i, sticky="nsew", padx=1)
+                lbl.grid(row=0, column=i, sticky="w", padx=1)
                 row_widgets.append(lbl)
             else:
                 lbl = tk.Label(
@@ -473,21 +615,23 @@ class QRGateDashboard:
                     bg=bg_color,
                     fg=COLORS["dark"],
                     font=("Arial", 10),
-                    width=width // 8,
+                    width=max(6, width // 10),
                     pady=10,
-                    wraplength=width - 10
+                    wraplength=max(50, width - 20),
+                    anchor="w",
+                    justify="left"
                 )
-                lbl.grid(row=0, column=i, sticky="nsew", padx=1)
+                lbl.grid(row=0, column=i, sticky="w", padx=1)
                 row_widgets.append(lbl)
 
-        for i in range(len(columns_data)):
-            row_frame.grid_columnconfigure(i, weight=1 if i in [1, 2] else 0)
+        for i, w in enumerate(column_widths):
+            row_frame.grid_columnconfigure(i, minsize=w, weight=0)
 
         self.rows_widgets.append(row_widgets)
 
     def create_qr_widget(self, parent, column, qr_code, bg_color, row_widgets):
         qr_frame = tk.Frame(parent, bg=bg_color)
-        qr_frame.grid(row=0, column=column, sticky="nsew", padx=1, pady=5)
+        qr_frame.grid(row=0, column=column, sticky="w", padx=1, pady=5)
 
         # Use cached QR code if available
         if qr_code in self.qr_images_cache:
@@ -510,11 +654,14 @@ class QRGateDashboard:
         try:
             if qr_code:
                 qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=80x80&data={qr_code}"
-                response = requests.get(qr_url, timeout=5)  # Increased timeout
+                response = requests.get(qr_url, timeout=5)
 
                 if response.status_code == 200:
                     img = Image.open(BytesIO(response.content))
-                    img = img.resize((60, 60), Image.Resampling.LANCZOS)
+                    # Reduce QR image size to avoid misalignment
+                    resample = getattr(Image, "Resampling", None)
+                    resample_filter = Image.Resampling.LANCZOS if resample else Image.ANTIALIAS
+                    img = img.resize((36, 36), resample_filter)
                     photo = ImageTk.PhotoImage(img)
 
                     # Cache the image
@@ -564,6 +711,36 @@ class QRGateDashboard:
         except:
             return dt_string
 
+    def format_duration(self, entry_ts, exit_ts=None, last_status=None):
+        """Return human readable duration between entry_ts and exit_ts.
+           If not exited, use now as end time. Expect ISO datetime strings."""
+        try:
+            if not entry_ts:
+                return "-"
+            fmt = "%Y-%m-%d %H:%M:%S"
+            entry = datetime.strptime(entry_ts, fmt)
+            if exit_ts and last_status and str(last_status).lower() in ("exited", "left", "out", "invalid", "exited_by"):
+                end = datetime.strptime(exit_ts, fmt)
+            elif exit_ts and last_status and str(last_status).lower() in ("valid", "inside"):
+                # sometimes last_scan is present for still-inside; compute live duration
+                # If a real exit time isn't indicated, treat last_scan as a checkpoint only.
+                end = datetime.strptime(exit_ts, fmt)
+            else:
+                end = datetime.now()
+            delta = end - entry
+            days = delta.days
+            hours = delta.seconds // 3600
+            mins = (delta.seconds % 3600) // 60
+            if days > 0:
+                return f"{days}d {hours}h {mins}m"
+            if hours > 0:
+                return f"{hours}h {mins}m"
+            if mins > 0:
+                return f"{mins}m"
+            return "now"
+        except Exception:
+            return "-"
+
     def periodic_update(self):
         while True:
             try:
@@ -584,5 +761,9 @@ class QRGateDashboard:
 
 
 if __name__ == "__main__":
+    print("=== QRGate Dashboard Starting ===")
+    print(f"API URL: {API_URL}")
+    print("Attempting first connection...")
+    
     app = QRGateDashboard()
     app.run()
