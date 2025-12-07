@@ -91,13 +91,13 @@ try {
     // Update visitor's last status and scan time
     $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=? WHERE visitor_id=?");
     if ($update_stmt) {
-        $status = 'Valid';
+        $status = 'Inside';
         $update_stmt->bind_param('ssi', $status, $current_time, $visitor_id);
         $update_stmt->execute();
     }
 
     echo json_encode([
-        'status'=>'Valid',
+        'status'=>'Inside',
         'visitor_id'=>$visitor_id,
         'visitor_name'=>$row['full_name'],
         'email'=>$row['email'],

@@ -37,7 +37,7 @@ STATUS_COLORS = {
     "Valid": "#d1f2eb",
     "Expired": "#fff3cd",
     "Invalid": "#fadbd8",
-    "Inside": "#e8f4fd"   # was "Pending" -> now "Inside"
+    "Inside": "#e8f4fd"
 }
 
 # Status text colors
@@ -45,7 +45,7 @@ STATUS_TEXT_COLORS = {
     "Valid": "#27ae60",
     "Expired": "#856404",
     "Invalid": "#e74c3c",
-    "Inside": "#0c5460"   # was "Pending"
+    "Inside": "#0c5460"
 }
 
 
@@ -181,7 +181,7 @@ class QRGateDashboard:
         self.stat_total = self.create_stat_card(stats_frame, "Total Visitors", "0", COLORS["primary"])
         self.stat_valid = self.create_stat_card(stats_frame, "Valid Access", "0", COLORS["success"])
         self.stat_expired = self.create_stat_card(stats_frame, "Expired", "0", COLORS["warning"])
-        self.stat_pending = self.create_stat_card(stats_frame, "Pending", "0", COLORS["dark"])
+        self.stat_pending = self.create_stat_card(stats_frame, "Inside", "0", COLORS["dark"])
 
     def create_stat_card(self, parent, label, value, color):
         card = tk.Frame(parent, bg=color, relief="raised", borderwidth=2)
@@ -211,7 +211,7 @@ class QRGateDashboard:
                   bg=COLORS["success"], fg="white", padx=10).pack(side="left", padx=2)
         tk.Button(control_frame, text="Expired", command=lambda: self.set_filter("Expired"),
                   bg=COLORS["warning"], fg="white", padx=10).pack(side="left", padx=2)
-        tk.Button(control_frame, text="Pending", command=lambda: self.set_filter("Pending"),
+        tk.Button(control_frame, text="Inside", command=lambda: self.set_filter("Inside"),
                   bg=COLORS["dark"], fg="white", padx=10).pack(side="left", padx=2)
 
         # Refresh and Export controls
@@ -270,9 +270,14 @@ class QRGateDashboard:
         self.display_data(self.filtered_data)
 
     def get_visitor_status(self, visitor):
-        last_status = visitor.get('last_status')
-        expiry_str = visitor.get('expiry_at', '')
+        """Determine visitor status based on last_status and expiry"""
+        last_status_raw = visitor.get('last_status')
+        last_status = str(last_status_raw or "").strip().lower()
 
+        expiry_str = visitor.get('expiry_at', '')
+        last_scan = visitor.get('last_scan')
+
+        # Check if expired
         try:
             expiry = datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S')
             now = datetime.now()
@@ -280,12 +285,36 @@ class QRGateDashboard:
         except:
             is_expired = False
 
-        if last_status:
-            return last_status
-        elif is_expired:
+        exit_statuses = ['exited', 'exit', 'left', 'out', 'exited_by']
+
+        # PRIORITY 1: Check last_status first (most reliable)
+        if last_status == "invalid":
+            return "Invalid"
+        
+        if last_status in exit_statuses:
+            return "Exited"
+        
+        if last_status == "inside":
+            # Only show Inside if not expired and has a scan time
+            if is_expired:
+                return "Expired"
+            if last_scan and last_scan not in ["None", "", None]:
+                return "Inside"
+        
+        if last_status == "expired":
             return "Expired"
-        else:
-            return "Pending"
+
+        # PRIORITY 2: Check expiry date
+        if is_expired:
+            return "Expired"
+
+        # PRIORITY 3: Check if they have scanned in (but status is not explicitly set)
+        if last_scan and last_scan not in ["None", "", None] and last_status not in ["invalid", "expired"]:
+            return "Inside"
+
+        # Default: Valid (not scanned yet, not expired)
+        return "Valid"
+
 
     def export_to_csv(self):
         if not self.current_data:
@@ -515,9 +544,13 @@ class QRGateDashboard:
             self.status_text.configure(text="Live Updates", fg=COLORS["dark"])
 
         except Exception as e:
-            print(f"Error updating dashboard: {e}")
+            import traceback
+            print("===== UPDATE ERROR START =====")
+            traceback.print_exc()
+            print("===== UPDATE ERROR END =====")
             self.status_dot.configure(fg=COLORS["danger"])
             self.status_text.configure(text="Update Error", fg=COLORS["danger"])
+
         finally:
             self.is_updating = False
 
@@ -525,7 +558,7 @@ class QRGateDashboard:
         total = len(self.current_data)
         valid = len([v for v in self.current_data if self.get_visitor_status(v) == "Valid"])
         expired = len([v for v in self.current_data if self.get_visitor_status(v) == "Expired"])
-        pending = len([v for v in self.current_data if self.get_visitor_status(v) == "Pending"])
+        pending = len([v for v in self.current_data if self.get_visitor_status(v) == "Inside"])
 
         self.stat_total.configure(text=str(total))
         self.stat_valid.configure(text=str(valid))
@@ -553,13 +586,11 @@ class QRGateDashboard:
 
         # Add new rows
         for r, visitor in enumerate(data):
+            print("Processing row:", visitor.get("visitor_id"))
             self.create_visitor_row(r + 1, visitor)
 
     def create_visitor_row(self, row_num, visitor):
         status = self.get_visitor_status(visitor)
-        # map backend 'Pending' to UI 'Inside'
-        if status == "Pending":
-            status = "Inside"
 
         bg_color = STATUS_COLORS.get(status, "#eaeded")
         status_text_color = STATUS_TEXT_COLORS.get(status, "#7f8c8d")
