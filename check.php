@@ -89,10 +89,11 @@ try {
     }
     
     // Update visitor's last status and scan time
-    $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=? WHERE visitor_id=?");
+    // entry_scan is only set ONCE (first scan-in). IF() keeps it if already set.
+    $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=?, entry_scan=IF(entry_scan IS NULL, ?, entry_scan) WHERE visitor_id=?");
     if ($update_stmt) {
         $status = 'Inside';
-        $update_stmt->bind_param('ssi', $status, $current_time, $visitor_id);
+        $update_stmt->bind_param('sssi', $status, $current_time, $current_time, $visitor_id);
         $update_stmt->execute();
     }
 

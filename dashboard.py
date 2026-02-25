@@ -13,9 +13,8 @@ import urllib3
 # Disable SSL warnings (for testing - remove in production)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# FIXED: Changed to HTTPS
 API_URL = "http://localhost/qrgate/get_visitors.php"
-UPDATE_INTERVAL = 15  # Increased from 3 to 15 seconds
+UPDATE_INTERVAL = 15  #15 seconds
 
 # Enhanced color scheme
 COLORS = {
@@ -213,7 +212,9 @@ class QRGateDashboard:
                   bg=COLORS["warning"], fg="white", padx=10).pack(side="left", padx=2)
         tk.Button(control_frame, text="Inside", command=lambda: self.set_filter("Inside"),
                   bg=COLORS["dark"], fg="white", padx=10).pack(side="left", padx=2)
-
+        tk.Button(control_frame, text="Exited", command=lambda: self.set_filter("Exited"),
+                  bg=COLORS["danger"], fg="white", padx=10).pack(side="left", padx=2)
+        
         # Refresh and Export controls
         self.auto_refresh_btn = tk.Button(
             control_frame,
@@ -336,11 +337,17 @@ class QRGateDashboard:
         try:
             with open(filename, 'w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
+                # include duration column
                 writer.writerow(
-                    ["ID", "Name", "Email", "Phone", "Purpose", "Host", "QR Code", "Status", "Expires At", "Last Scan",
+                    ["ID", "Name", "Email", "Phone", "Purpose", "Host", "QR Code", "Status", "Expires At", "Last Scan", "Duration",
                      "Created At"])
 
                 for visitor in self.current_data:
+                    duration = self.format_duration(
+                        last_scan=visitor.get('entry_scan') or visitor.get('last_scan'),
+                        exit_ts=visitor.get('exit_time'),
+                        last_status=self.get_visitor_status(visitor)
+                    )
                     writer.writerow([
                         visitor.get('visitor_id', ''),
                         visitor.get('full_name', ''),
@@ -352,6 +359,7 @@ class QRGateDashboard:
                         self.get_visitor_status(visitor),
                         visitor.get('expiry_at', ''),
                         visitor.get('last_scan', ''),
+                        duration,
                         visitor.get('created_at', '')
                     ])
 
@@ -379,39 +387,30 @@ class QRGateDashboard:
             )
             lbl.grid(row=0, column=i, sticky="w", padx=1)
             header_frame.grid_columnconfigure(i, minsize=width, weight=0)
+    def display_data(self, data):
+        # Clear old rows
+        for child in self.data_frame.winfo_children():
+            child.destroy()
+        self.rows_widgets.clear()
 
-    def fetch_via_playwright(self):
-        """Fallback: use Playwright to run the JS challenge and return JSON data (requires playwright installed)."""
-        try:
-            from playwright.sync_api import sync_playwright
-        except Exception as e:
-            print("Playwright not installed or failed to import:", e)
-            return []
+        if not data:
+            no_data_label = tk.Label(
+                self.data_frame,
+                text="No visitors found. Check your connection or try refreshing.",
+                font=("Arial", 14),
+                bg=COLORS["white"],
+                fg=COLORS["dark"],
+                pady=50
+            )
+            no_data_label.pack()
+            return
 
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                ctx = browser.new_context()
-                page = ctx.new_page()
-                page.goto(API_URL, wait_until="networkidle", timeout=30000)
-                # After challenge the page should either redirect or show the JSON body.
-                # Try to read body text (if JSON returned directly)
-                body_text = page.inner_text("body")
-                browser.close()
-
-                import json
-                try:
-                    data = json.loads(body_text)
-                    if isinstance(data, dict) and 'data' in data:
-                        return data['data']
-                    if isinstance(data, list):
-                        return data
-                except Exception as e:
-                    print("Playwright fetch returned non-JSON body:", e)
-                    return []
-        except Exception as e:
-            print("Playwright error:", e)
-            return []
+        # Batch create all rows at once (defer image loading)
+        for r, visitor in enumerate(data):
+            self.create_visitor_row(r + 1, visitor)
+        
+        # Force UI update after all rows created
+        self.data_frame.update_idletasks()
 
     def fetch_data(self):
         try:
@@ -426,12 +425,6 @@ class QRGateDashboard:
             print(f"Response status code: {response.status_code}")
             print(f"Response headers: {response.headers}")
             response.raise_for_status()
-
-            text_snip = response.text[:1000].lower()
-            if '<!doctype' in text_snip or '<html' in text_snip or 'cloudflare' in text_snip or 'attention required' in text_snip:
-                print("Detected HTML response (JS challenge). Attempting Playwright fallback...")
-                # try headless browser fallback
-                return self.fetch_via_playwright()
 
             data = response.json()
             
@@ -524,17 +517,15 @@ class QRGateDashboard:
 
             # Check if data actually changed
             new_hash = self.calculate_data_hash(new_data)
-            if new_hash == self.last_data_hash and self.current_data:
-                self.status_dot.configure(fg=COLORS["success"])
-                return
+            data_changed = new_hash != self.last_data_hash
 
-            self.last_data_hash = new_hash
-            self.current_data = new_data
+            if data_changed or not self.current_data:
+                # New/changed data - update everything
+                self.last_data_hash = new_hash
+                self.current_data = new_data
+                self.update_statistics()
 
-            # Update statistics
-            self.update_statistics()
-
-            # Apply filters and display
+            # ALWAYS redraw so duration ticks live for Inside visitors
             self.apply_filters()
 
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -565,30 +556,6 @@ class QRGateDashboard:
         self.stat_expired.configure(text=str(expired))
         self.stat_pending.configure(text=str(pending))
 
-    def display_data(self, data):
-        # Clear old rows
-        for child in self.data_frame.winfo_children():
-            child.destroy()
-        self.rows_widgets.clear()
-
-        if not data:
-            # Show "No data" message
-            no_data_label = tk.Label(
-                self.data_frame,
-                text="No visitors found. Check your connection or try refreshing.",
-                font=("Arial", 14),
-                bg=COLORS["white"],
-                fg=COLORS["dark"],
-                pady=50
-            )
-            no_data_label.pack()
-            return
-
-        # Add new rows
-        for r, visitor in enumerate(data):
-            print("Processing row:", visitor.get("visitor_id"))
-            self.create_visitor_row(r + 1, visitor)
-
     def create_visitor_row(self, row_num, visitor):
         status = self.get_visitor_status(visitor)
 
@@ -603,8 +570,12 @@ class QRGateDashboard:
 
         row_widgets = []
 
-        # compute duration using created_at and last_scan (or last_status if available)
-        duration_str = self.format_duration(visitor.get('created_at'), visitor.get('last_scan'), visitor.get('last_status'))
+        # Duration = time inside only. Use computed status so Expired always shows '-'
+        duration_str = self.format_duration(
+            last_scan=visitor.get('entry_scan') or visitor.get('last_scan'),
+            exit_ts=visitor.get('exit_time'),
+            last_status=self.get_visitor_status(visitor)
+        )
 
         columns_data = [
             str(visitor.get('visitor_id', '')),
@@ -742,33 +713,41 @@ class QRGateDashboard:
         except:
             return dt_string
 
-    def format_duration(self, entry_ts, exit_ts=None, last_status=None):
-        """Return human readable duration between entry_ts and exit_ts.
-           If not exited, use now as end time. Expect ISO datetime strings."""
+    def format_duration(self, last_scan=None, exit_ts=None, last_status=None):
+        """Duration = time spent INSIDE only.
+        - Valid/Expired/Invalid -> "-"  (never entered)
+        - Inside  -> entry_scan to now  (live ticking)
+        - Exited  -> entry_scan to exit_time (fixed)
+        """
         try:
-            if not entry_ts:
+            status = str(last_status or "").lower()
+            if status in ("valid", "expired", "invalid", ""):
+                return "-"
+            if not last_scan or last_scan in ("None", None):
                 return "-"
             fmt = "%Y-%m-%d %H:%M:%S"
-            entry = datetime.strptime(entry_ts, fmt)
-            if exit_ts and last_status and str(last_status).lower() in ("exited", "left", "out", "invalid", "exited_by"):
+            entry = datetime.strptime(last_scan, fmt)
+            if status in ("exited", "left", "out", "exited_by"):
+                if not exit_ts or exit_ts in ("None", "", None):
+                    return "-"
                 end = datetime.strptime(exit_ts, fmt)
-            elif exit_ts and last_status and str(last_status).lower() in ("valid", "inside"):
-                # sometimes last_scan is present for still-inside; compute live duration
-                # If a real exit time isn't indicated, treat last_scan as a checkpoint only.
-                end = datetime.strptime(exit_ts, fmt)
-            else:
+            elif status == "inside":
                 end = datetime.now()
+            else:
+                return "-"
             delta = end - entry
-            days = delta.days
+            if delta.total_seconds() < 0:
+                return "-"
+            days  = delta.days
             hours = delta.seconds // 3600
-            mins = (delta.seconds % 3600) // 60
+            mins  = (delta.seconds % 3600) // 60
             if days > 0:
                 return f"{days}d {hours}h {mins}m"
             if hours > 0:
                 return f"{hours}h {mins}m"
             if mins > 0:
                 return f"{mins}m"
-            return "now"
+            return "just now"
         except Exception:
             return "-"
 

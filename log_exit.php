@@ -17,7 +17,7 @@ try {
     // Get visitor information
     $stmt = $mysqli->prepare("
         SELECT visitor_id, full_name, email, phone, purpose, host, 
-               expiry_at, created_at, exit_time 
+               expiry_at, created_at, exit_time, last_scan, entry_scan
         FROM visitors 
         WHERE qr_code = ? 
         LIMIT 1
@@ -107,9 +107,10 @@ try {
         'phone' => $visitor['phone'],
         'purpose' => $visitor['purpose'],
         'host' => $visitor['host'],
-        'entry_time' => date('M d, Y h:i A', strtotime($visitor['created_at'])),
+        // Use entry_scan (gate scan time) not created_at (registration time)
+        'entry_time' => date('M d, Y h:i A', strtotime($visitor['entry_scan'] ?? $visitor['last_scan'] ?? $visitor['created_at'])),
         'exit_time' => date('M d, Y h:i A', strtotime($current_time)),
-        'duration' => calculateDuration($visitor['created_at'], $current_time)
+        'duration' => calculateDuration($visitor['entry_scan'] ?? $visitor['last_scan'] ?? $visitor['created_at'], $current_time)
     ]);
     
 } catch (Exception $e) {

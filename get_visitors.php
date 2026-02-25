@@ -6,7 +6,7 @@ require __DIR__ . '/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-$sql = "SELECT visitor_id, full_name, email, phone, purpose, host, notes, qr_code, expiry_at, last_status, last_scan, exit_time, created_at
+$sql = "SELECT visitor_id, full_name, email, phone, purpose, host, notes, qr_code, expiry_at, last_status, last_scan, entry_scan, exit_time, created_at
         FROM visitors ORDER BY visitor_id DESC";
 
 try {
