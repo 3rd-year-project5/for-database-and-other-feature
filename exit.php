@@ -189,19 +189,26 @@
             }
         });
 
-        // Auto-submit when QR scanner inputs data (typically ends with Enter)
+        // Attempt to auto-submit only when input appears very quickly (scanner) –
+        // avoid triggering during slow manual typing.
         let scanBuffer = '';
         let scanTimeout;
+        let lastInputTimestamp = 0;
 
         document.getElementById('qrInput').addEventListener('input', function(e) {
+            const now = Date.now();
+            const delta = now - lastInputTimestamp;
+            lastInputTimestamp = now;
+
             clearTimeout(scanTimeout);
             scanBuffer = this.value;
-            
-            // If input is long enough (QR codes are typically 10+ chars), auto-submit after brief delay
-            if (scanBuffer.length >= 10) {
+
+            // Only treat as a scan if characters are arriving quickly (e.g. <100ms apart)
+            // and the buffer has reached a reasonable length to be a QR code.
+            if (scanBuffer.length >= 10 && delta < 100) {
                 scanTimeout = setTimeout(() => {
                     logExit();
-                }, 300);
+                }, 200);
             }
         });
 

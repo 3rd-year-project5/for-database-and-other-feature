@@ -41,6 +41,7 @@
         .button-group { display: flex; gap: 10px; align-items: center; }
         #qrcode { text-align: center; margin-top: 30px; padding: 20px; background-color: #f9f9f9; border-radius: 5px; min-height: 50px; }
         #visitorDetails { margin-top: 20px; }
+        #qrcode a { text-decoration: none; color: #fff; background-color: #4CAF50; padding: 10px 20px; border-radius: 5px; display: inline-block; }
         .success-msg { color: #4CAF50; padding: 10px; background-color: #e8f5e8; border-radius: 5px; margin: 10px 0; }
         .error-msg { color: #f44336; padding: 10px; background-color: #ffebee; border-radius: 5px; margin: 10px 0; }
         .visitor-info { background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }
@@ -120,7 +121,23 @@
             img.src = url;
             img.alt = 'QR Code';
             img.style.maxWidth = '100%';
+            img.crossOrigin = 'anonymous'; // allow canvas conversion
             return img;
+        }
+
+        // convert an <img> element to a data URL using a canvas
+        function imageToDataURL(img, callback){
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            try {
+                const dataURL = canvas.toDataURL('image/png');
+                callback(null, dataURL);
+            } catch(err){
+                callback(err);
+            }
         }
 
         function escapeHtml(text) {
@@ -169,6 +186,30 @@
                 qrInfo.className = 'qr-code-info';
                 qrInfo.innerHTML = `<p><strong>QR Code ID:</strong> ${escapeHtml(data.qr_code)}</p>`;
                 qrDiv.appendChild(qrInfo);
+
+                // create download link once the image has loaded and been converted to a data URL
+                const downloadLink = document.createElement('a');
+                downloadLink.textContent = '⬇️ Download QR Code';
+                downloadLink.style.display = 'none';
+                downloadLink.style.marginTop = '10px';
+                qrDiv.appendChild(downloadLink);
+
+                qrImg.onload = function(){
+                    imageToDataURL(qrImg, function(err, dataURL){
+                        if(err){
+                            console.warn('Unable to convert QR image for download:', err);
+                            // fallback: allow browser to open in new tab instead
+                            downloadLink.href = qrImg.src;
+                        } else {
+                            downloadLink.href = dataURL;
+                        }
+                        downloadLink.download = 'qrcode.png';
+                        downloadLink.style.display = 'block';
+                    });
+                };
+                qrImg.onerror = function(){
+                    showMessage('Failed to load QR image for download','error');
+                };
 
                 const visitorDiv = document.getElementById('visitorDetails');
                 visitorDiv.innerHTML = `<div class="visitor-info">

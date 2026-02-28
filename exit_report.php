@@ -160,6 +160,15 @@ $email = $_SESSION['email'] ?? '';
             background: #f8d7da;
             color: #721c24;
         }
+        /* new status badges matching dashboard logic */
+        .badge.invalid {
+            background: #fce4ec;
+            color: #880e4f;
+        }
+        .badge.valid {
+            background: #e0f7fa;
+            color: #006064;
+        }
         .duration {
             font-weight: bold;
             color: #3498db;
@@ -213,6 +222,8 @@ $email = $_SESSION['email'] ?? '';
                         <option value="exited">Exited</option>
                         <option value="inside">Still Inside</option>
                         <option value="expired">Expired</option>
+                        <option value="valid">Pending/Valid</option>
+                        <option value="invalid">Invalid</option>
                     </select>
                     <input type="date" id="filterDate" onchange="applyFilters()" 
                            value="<?php echo date('Y-m-d'); ?>">
@@ -248,19 +259,55 @@ $email = $_SESSION['email'] ?? '';
             }
         }
 
+        // determine visitor status using same rules as Python dashboard
+        function getVisitorStatus(visitor) {
+            const raw = visitor.last_status;
+            const last_status = String(raw || '').trim().toLowerCase();
+            
+            const expiryStr = visitor.expiry_at || '';
+            let isExpired = false;
+            if (expiryStr) {
+                const expiry = new Date(expiryStr);
+                const now = new Date();
+                isExpired = expiry < now;
+            }
+
+            const exitStatuses = ['exited','exit','left','out','exited_by'];
+
+            if (last_status === 'invalid') return 'Invalid';
+            if (exitStatuses.includes(last_status)) return 'Exited';
+            if (last_status === 'inside') {
+                if (isExpired) return 'Expired';
+                if (visitor.last_scan && visitor.last_scan !== 'None' && visitor.last_scan !== '') {
+                    return 'Inside';
+                }
+            }
+            if (last_status === 'expired') return 'Expired';
+            if (isExpired) return 'Expired';
+            if (visitor.last_scan && visitor.last_scan !== 'None' && visitor.last_scan !== '') {
+                return 'Inside';
+            }
+            return 'Valid';
+        }
+
         function updateStats() {
             const today = new Date().toISOString().split('T')[0];
             const todayVisitors = allVisitors.filter(v => 
                 v.created_at && v.created_at.startsWith(today)
             );
-            
-            const exited = todayVisitors.filter(v => v.exit_time).length;
-            const inside = todayVisitors.filter(v => !v.exit_time && v.last_status !== 'Expired').length;
-            
+
+            const statuses = todayVisitors.map(getVisitorStatus);
+            const exited = statuses.filter(s => s === 'Exited').length;
+            const inside = statuses.filter(s => s === 'Inside').length;
+            const expired = statuses.filter(s => s === 'Expired').length;
+            const valid = statuses.filter(s => s === 'Valid').length;
+
             document.getElementById('totalToday').textContent = todayVisitors.length;
             document.getElementById('exitedToday').textContent = exited;
             document.getElementById('stillInside').textContent = inside;
-            
+            // optionally show additional stats somewhere, e.g. console
+            console.log(`Today stats - expired:${expired} valid:${valid}`);
+
             const durations = todayVisitors
                 .filter(v => v.exit_time)
                 .map(v => {
@@ -268,7 +315,7 @@ $email = $_SESSION['email'] ?? '';
                     const exit = new Date(v.exit_time);
                     return (exit - entry) / 1000 / 60;
                 });
-            
+
             if (durations.length > 0) {
                 const avgMinutes = durations.reduce((a, b) => a + b, 0) / durations.length;
                 const hours = Math.floor(avgMinutes / 60);
@@ -292,9 +339,12 @@ $email = $_SESSION['email'] ?? '';
             
             if (statusFilter !== 'all') {
                 filtered = filtered.filter(v => {
-                    if (statusFilter === 'exited') return v.exit_time;
-                    if (statusFilter === 'inside') return !v.exit_time && v.last_status !== 'Expired';
-                    if (statusFilter === 'expired') return v.last_status === 'Expired';
+                    const s = getVisitorStatus(v).toLowerCase();
+                    if (statusFilter === 'exited') return s === 'exited';
+                    if (statusFilter === 'inside') return s === 'inside';
+                    if (statusFilter === 'expired') return s === 'expired';
+                    if (statusFilter === 'valid') return s === 'valid';
+                    if (statusFilter === 'invalid') return s === 'invalid';
                     return true;
                 });
             }
@@ -343,12 +393,20 @@ $email = $_SESSION['email'] ?? '';
         }
 
         function getStatusBadge(visitor) {
-            if (visitor.exit_time) {
-                return '<span class="badge exited">✓ Exited</span>';
-            } else if (visitor.last_status === 'Expired') {
-                return '<span class="badge expired">⏰ Expired</span>';
-            } else {
-                return '<span class="badge inside">👤 Inside</span>';
+            const status = getVisitorStatus(visitor);
+            switch(status) {
+                case 'Exited':
+                    return '<span class="badge exited">✓ Exited</span>';
+                case 'Expired':
+                    return '<span class="badge expired">⏰ Expired</span>';
+                case 'Inside':
+                    return '<span class="badge inside">👤 Inside</span>';
+                case 'Valid':
+                    return '<span class="badge valid">⏳ Pending</span>';
+                case 'Invalid':
+                    return '<span class="badge invalid">❌ Invalid</span>';
+                default:
+                    return `<span class="badge">${status}</span>`;
             }
         }
 

@@ -13,7 +13,7 @@ import urllib3
 # Disable SSL warnings (for testing - remove in production)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = "http://localhost/qrgate/get_visitors.php"
+API_URL = "https://qrgate-production.up.railway.app/get_visitors.php"
 UPDATE_INTERVAL = 15  #15 seconds
 
 # Enhanced color scheme
