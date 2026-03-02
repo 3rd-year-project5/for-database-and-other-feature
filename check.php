@@ -1,116 +1,138 @@
 <?php
-// Fix for check.php - Add timezone setting at the top
-
 // Set timezone to Philippines
 date_default_timezone_set('Asia/Manila');
 
-require __DIR__.'/db.php';
+require __DIR__ . '/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
-$qr = $_GET['qr'] ?? '';
-if ($qr === '') { 
+$qr_code = trim($_POST['qr_code'] ?? '');
+
+if (empty($qr_code)) {
     http_response_code(400);
-    echo json_encode(['status'=>'Invalid', 'msg'=>'QR code parameter missing']); 
-    exit; 
+    exit(json_encode(['ok' => false, 'msg' => 'QR code is required']));
 }
 
 try {
-    // Get visitor info from visitors table
-    $stmt = $mysqli->prepare("SELECT visitor_id, full_name, email, phone, purpose, host, expiry_at FROM visitors WHERE qr_code=? LIMIT 1");
+    // Get visitor information
+    $stmt = $mysqli->prepare("
+        SELECT visitor_id, full_name, email, phone, purpose, host, 
+               expiry_at, created_at, exit_time, last_scan, entry_scan
+        FROM visitors 
+        WHERE qr_code = ? 
+        LIMIT 1
+    ");
     
     if (!$stmt) {
         throw new Exception("Prepare failed: " . $mysqli->error);
     }
     
-    $stmt->bind_param('s', $qr);
+    $stmt->bind_param('s', $qr_code);
     
     if (!$stmt->execute()) {
         throw new Exception("Execute failed: " . $stmt->error);
     }
     
-    $res = $stmt->get_result();
-    $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
-
-    if ($res->num_rows === 0) {
-        // Log invalid attempt
-        $log_stmt = $mysqli->prepare("INSERT INTO logs(qr_code, status) VALUES(?, 'Invalid')");
-        if ($log_stmt) {
-            $log_stmt->bind_param('s', $qr);
-            $log_stmt->execute();
-        }
-        
-        echo json_encode(['status'=>'Invalid', 'msg'=>'QR code not found']);
-        exit;
-    }
-
-    $row = $res->fetch_assoc();
-    $expiry = new DateTimeImmutable($row['expiry_at'], new DateTimeZone('Asia/Manila'));
+    $result = $stmt->get_result();
     
-    // Debug logging
-    error_log("Current time: " . $now->format('Y-m-d H:i:s'));
-    error_log("Expiry time: " . $expiry->format('Y-m-d H:i:s'));
-    error_log("Is expired? " . ($expiry < $now ? 'YES' : 'NO'));
-    
-    $visitor_id = $row['visitor_id'];
-    $current_time = $now->format('Y-m-d H:i:s');
-    
-    if ($expiry < $now) {
-        // Log expired attempt
-        $log_stmt = $mysqli->prepare("INSERT INTO logs(visitor_id, qr_code, status) VALUES(?, ?, 'Expired')");
-        if ($log_stmt) {
-            $log_stmt->bind_param('is', $visitor_id, $qr);
-            $log_stmt->execute();
-        }
-        
-        // Update visitor's last status and scan time
-        $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=? WHERE visitor_id=?");
-        if ($update_stmt) {
-            $status = 'Expired';
-            $update_stmt->bind_param('ssi', $status, $current_time, $visitor_id);
-            $update_stmt->execute();
-        }
-        
+    if ($result->num_rows === 0) {
         echo json_encode([
-            'status'=>'Expired', 
-            'msg'=>'QR code has expired',
-            'visitor_id'=>$visitor_id,
-            'expired_at'=>$row['expiry_at'],
-            'current_time'=>$current_time // For debugging
+            'ok' => false, 
+            'msg' => 'QR code not found. Please check and try again.'
         ]);
         exit;
     }
-
-    // Valid QR code - log successful scan
-    $log_stmt = $mysqli->prepare("INSERT INTO logs(visitor_id, qr_code, status) VALUES(?, ?, 'Valid')");
+    
+    $visitor = $result->fetch_assoc();
+    $current_time = date('Y-m-d H:i:s');
+    
+    // We used to prevent multiple exits, but allow re-using a QR.  Any
+    // call to log_exit now simply overwrites the previous exit_time so
+    // that a visitor can re-enter and exit again without database errors.
+    
+    // Check if QR code is expired
+    $expiry = new DateTimeImmutable($visitor['expiry_at'], new DateTimeZone('Asia/Manila'));
+    $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
+    
+    if ($expiry < $now) {
+        echo json_encode([
+            'ok' => false, 
+            'msg' => 'QR code has expired. Cannot log exit.',
+            'expired_at' => $visitor['expiry_at']
+        ]);
+        exit;
+    }
+    
+    // Update exit time
+    $update_stmt = $mysqli->prepare("
+        UPDATE visitors 
+        SET exit_time = ?, last_status = 'Exited', last_scan = ? 
+        WHERE visitor_id = ?
+    ");
+    
+    if (!$update_stmt) {
+        throw new Exception("Update prepare failed: " . $mysqli->error);
+    }
+    
+    $update_stmt->bind_param('ssi', $current_time, $current_time, $visitor['visitor_id']);
+    
+    if (!$update_stmt->execute()) {
+        throw new Exception("Update execute failed: " . $update_stmt->error);
+    }
+    
+    // FIXED: Log the exit in logs table with correct parameters
+    $log_stmt = $mysqli->prepare("
+        INSERT INTO logs(visitor_id, qr_code, status) 
+        VALUES(?, ?, ?)
+    ");
+    
     if ($log_stmt) {
-        $log_stmt->bind_param('is', $visitor_id, $qr);
+        $status = 'Exited';
+        $log_stmt->bind_param('iss', $visitor['visitor_id'], $qr_code, $status);
         $log_stmt->execute();
     }
     
-    // Update visitor's last status and scan time
-    // entry_scan is only set ONCE (first scan-in). IF() keeps it if already set.
-    $update_stmt = $mysqli->prepare("UPDATE visitors SET last_status=?, last_scan=?, entry_scan=IF(entry_scan IS NULL, ?, entry_scan) WHERE visitor_id=?");
-    if ($update_stmt) {
-        $status = 'Inside';
-        $update_stmt->bind_param('sssi', $status, $current_time, $current_time, $visitor_id);
-        $update_stmt->execute();
-    }
-
+    // Success response
     echo json_encode([
-        'status'=>'Inside',
-        'visitor_id'=>$visitor_id,
-        'visitor_name'=>$row['full_name'],
-        'email'=>$row['email'],
-        'phone'=>$row['phone'],
-        'purpose'=>$row['purpose'],
-        'host'=>$row['host'],
-        'expires_at'=>$row['expiry_at'],
-        'current_time'=>$current_time // For debugging
+        'ok' => true,
+        'msg' => 'Exit logged successfully! Thank you for visiting.',
+        'visitor_id' => $visitor['visitor_id'],
+        'visitor_name' => $visitor['full_name'],
+        'email' => $visitor['email'],
+        'phone' => $visitor['phone'],
+        'purpose' => $visitor['purpose'],
+        'host' => $visitor['host'],
+        // Use entry_scan (gate scan time) not created_at (registration time)
+        'entry_time' => date('M d, Y h:i A', strtotime($visitor['entry_scan'] ?? $visitor['last_scan'] ?? $visitor['created_at'])),
+        'exit_time' => date('M d, Y h:i A', strtotime($current_time)),
+        'duration' => calculateDuration($visitor['entry_scan'] ?? $visitor['last_scan'] ?? $visitor['created_at'], $current_time)
     ]);
     
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['status'=>'Error', 'msg'=>'Database error: ' . $e->getMessage()]);
+    echo json_encode([
+        'ok' => false, 
+        'msg' => 'Database error: ' . $e->getMessage()
+    ]);
+}
+
+function calculateDuration($entry_time, $exit_time) {
+    $tz = new DateTimeZone('Asia/Manila');
+    $entry = new DateTime($entry_time, $tz);
+    $exit = new DateTime($exit_time, $tz);
+    $interval = $entry->diff($exit);
+    
+    $duration = '';
+    if ($interval->h > 0) {
+        $duration .= $interval->h . ' hour' . ($interval->h > 1 ? 's' : '') . ' ';
+    }
+    if ($interval->i > 0) {
+        $duration .= $interval->i . ' minute' . ($interval->i > 1 ? 's' : '');
+    }
+    if (empty($duration)) {
+        $duration = 'Less than a minute';
+    }
+    
+    return trim($duration);
 }
 ?>
