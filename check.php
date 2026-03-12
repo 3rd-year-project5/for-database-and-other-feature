@@ -2,7 +2,7 @@
 // Set timezone to Philippines
 date_default_timezone_set('Asia/Manila');
 
-require __DIR__.'/db.php';
+require __DIR__ . '/db.php';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 
@@ -83,7 +83,10 @@ try {
 
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['status'=>'Error', 'msg'=>'Database error: ' . $e->getMessage()]);
+    echo json_encode([
+        'ok' => false, 
+        'msg' => 'Database error: ' . $e->getMessage()
+    ]);
 }
 ?>
 
