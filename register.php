@@ -231,4 +231,5 @@ try {
         'msg' => 'Database error: ' . $e->getMessage()
     ]);
 }
+
 ?>

@@ -46,14 +46,9 @@ try {
     $visitor = $result->fetch_assoc();
     $current_time = date('Y-m-d H:i:s');
     
-    // Check if already exited
-    if (!empty($visitor['exit_time'])) {
-        echo json_encode([
-            'ok' => false, 
-            'msg' => 'This visitor has already logged an exit at ' . date('M d, Y h:i A', strtotime($visitor['exit_time']))
-        ]);
-        exit;
-    }
+    // We used to prevent multiple exits, but allow re-using a QR.  Any
+    // call to log_exit now simply overwrites the previous exit_time so
+    // that a visitor can re-enter and exit again without database errors.
     
     // Check if QR code is expired
     $expiry = new DateTimeImmutable($visitor['expiry_at'], new DateTimeZone('Asia/Manila'));
@@ -141,3 +136,4 @@ function calculateDuration($entry_time, $exit_time) {
     return trim($duration);
 }
 ?>
+
